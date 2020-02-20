@@ -24,14 +24,46 @@
 var app1 = new Vue({
     el: '#app',
     data: {
-        startMsg    : 'Vue has started, waiting for messages',
-        feVersion   : '',
-        counterBtn  : 0,
-        inputText   : null,
-        inputChkBox : false,
+        dev: {},
+        data: {},
+        // items: [
+        //   { isActive: true, age: 40, name: { first: 'Dickerson', last: 'Macdonald' } },
+        //   { isActive: false, age: 21, name: { first: 'Larsen', last: 'Shaw' } },
+        //   {
+        //     isActive: false,
+        //     age: 9,
+        //     name: { first: 'Mini', last: 'Navarro' },
+        //     _rowVariant: 'success'
+        //   },
+        //   { isActive: false, age: 89, name: { first: 'Geneva', last: 'Wilson' } },
+        //   { isActive: true, age: 38, name: { first: 'Jami', last: 'Carney' } },
+        //   { isActive: false, age: 27, name: { first: 'Essie', last: 'Dunlap' } },
+        //   { isActive: true, age: 40, name: { first: 'Thor', last: 'Macdonald' } },
+        //   {
+        //     isActive: true,
+        //     age: 87,
+        //     name: { first: 'Larsen', last: 'Shaw' },
+        //     _cellVariants: { age: 'danger', isActive: 'warning' }
+        //   },
+        //   { isActive: false, age: 26, name: { first: 'Mitzi', last: 'Navarro' } },
+        //   { isActive: false, age: 22, name: { first: 'Genevieve', last: 'Wilson' } },
+        //   { isActive: true, age: 38, name: { first: 'John', last: 'Carney' } },
+        //   { isActive: false, age: 29, name: { first: 'Dick', last: 'Dunlap' } }
+        // ],
+        fields: [],
+        totalRows: 1,
+        currentPage: 1,
+        perPage: 50,
+        pageOptions: [50, 100, 150, 200, 250, 300],
+        sortBy: '',
+        sortDesc: false,
+        sortDirection: 'asc',
+        filter: null,
+        filterOn: [],
+        options: [],
+
         socketConnectedState : false,
         serverTimeOffset     : '[unknown]',
-        imgProps             : { width: 75, height: 75 },
 
         msgRecvd    : '[Nothing]',
         msgsReceived: 0,
@@ -44,68 +76,26 @@ var app1 = new Vue({
         msgsCtrlSent: 0,
     }, // --- End of data --- //
     computed: {
-        hLastRcvd: function() {
-            var msgRecvd = this.msgRecvd
-            if (typeof msgRecvd === 'string') return 'Last Message Received = ' + msgRecvd
-            else return 'Last Message Received = ' + this.syntaxHighlight(msgRecvd)
+        sortOptions() {
+            // Create an options list from our fields
+            return this.fields
+                .filter(f => f.sortable)
+                .map(f => {
+                    return { text: f.label, value: f.key }
+                })
         },
-        hLastSent: function() {
-            var msgSent = this.msgSent
-            if (typeof msgSent === 'string') return 'Last Message Sent = ' + msgSent
-            else return 'Last Message Sent = ' + this.syntaxHighlight(msgSent)
-        },
-        hLastCtrlRcvd: function() {
-            var msgCtrl = this.msgCtrl
-            if (typeof msgCtrl === 'string') return 'Last Control Message Received = ' + msgCtrl
-            else return 'Last Control Message Received = ' + this.syntaxHighlight(msgCtrl)
-        },
-        hLastCtrlSent: function() {
-            var msgCtrlSent = this.msgCtrlSent
-            if (typeof msgCtrlSent === 'string') return 'Last Control Message Sent = ' + msgCtrlSent
-            //else return 'Last Message Sent = ' + this.callMethod('syntaxHighlight', [msgCtrlSent])
-            else return 'Last Control Message Sent = ' + this.syntaxHighlight(msgCtrlSent)
-        },
+        items() {
+            return Object.keys(this.dev).map(key => {
+                return {...this.dev[key], ...(this.data[key] || {})}
+            })
+        }
     }, // --- End of computed --- //
     methods: {
-        increment: function(event) {
-            console.log('Button Pressed. Event DatA: ', event)
-
-            // Increment the count by one
-            this.counterBtn = this.counterBtn + 1
-            var topic = this.msgRecvd.topic || 'uibuilder/vue'
-            uibuilder.send( {
-                'topic': topic,
-                'payload': {
-                    'type': 'counterBtn',
-                    'btnCount': this.counterBtn,
-                    'message': this.inputText,
-                    'inputChkBox': this.inputChkBox
-                }
-            } )
-
-        }, // --- End of increment --- //
-
-        // return formatted HTML version of JSON object
-        syntaxHighlight: function(json) {
-            json = JSON.stringify(json, undefined, 4)
-            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            json = json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
-                var cls = 'number'
-                if (/^"/.test(match)) {
-                    if (/:$/.test(match)) {
-                        cls = 'key'
-                    } else {
-                        cls = 'string'
-                    }
-                } else if (/true|false/.test(match)) {
-                    cls = 'boolean'
-                } else if (/null/.test(match)) {
-                    cls = 'null'
-                }
-                return '<span class="' + cls + '">' + match + '</span>'
-            })
-            return json
-        }, // --- End of syntaxHighlight --- //
+        onFiltered(filteredItems) {
+            // Trigger pagination to update the number of buttons/pages due to filtering
+            this.totalRows = filteredItems.length
+            this.currentPage = 1
+        } // --- End of onFiltered --- //
     }, // --- End of methods --- //
 
     // Available hooks: init,mounted,updated,destroyed
@@ -114,16 +104,12 @@ var app1 = new Vue({
 
         /** **REQUIRED** Start uibuilder comms with Node-RED @since v2.0.0-dev3
          * Pass the namespace and ioPath variables if hosting page is not in the instance root folder
-         * The namespace is the "url" you put in uibuilder's configuration in the Editor.
          * e.g. If you get continual `uibuilderfe:ioSetup: SOCKET CONNECT ERROR` error messages.
-         * e.g. uibuilder.start('uib', '/nr/uibuilder/vendor/socket.io') // change to use your paths/names
+         * e.g. uibuilder.start('/nr/uib', '/nr/uibuilder/vendor/socket.io') // change to use your paths/names
          */
         uibuilder.start()
 
         var vueApp = this
-
-        // Example of retrieving data from uibuilder
-        vueApp.feVersion = uibuilder.get('version')
 
         /** You can use the following to help trace how messages flow back and forth.
          * You can then amend this processing to suite your requirements.
@@ -135,6 +121,14 @@ var app1 = new Vue({
         uibuilder.onChange('msg', function(newVal){
             //console.info('[indexjs:uibuilder.onChange] msg received from Node-RED server:', newVal)
             vueApp.msgRecvd = newVal
+            if (newVal.topic === 'init') {
+                vueApp.fields = newVal.payload.fields
+                vueApp.options = newVal.payload.options
+            } else if(newVal.topic === 'dev') {
+                vueApp.dev = newVal.payload
+            } else if(newVal.topic === 'data') {
+                vueApp.data = newVal.payload
+            }
         })
         // As we receive new messages, we get an updated count as well
         uibuilder.onChange('msgsReceived', function(newVal){
